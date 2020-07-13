@@ -84,7 +84,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -456,43 +455,56 @@ public class Iterables {
    * @throws AssertionError if the given {@code Iterable} does not contain the given sequence of objects.
    */
   public void assertContainsSequence(AssertionInfo info, Iterable<?> actual, Object[] sequence) {
-    // perform the checks that would have been done in commonCheckThatIterableAssertionSucceeds but do them explicitly without
-    // having to create a new iterator on actual - which would break if actual were only singly-traversable.
+    // perform the checks that would have been done in commonCheckThatIterableAssertionSucceeds
+    // but do them explicitly without having to create a new iterator on actual - which would
+    // break if actual were only singly-traversable.
     checkNotNullIterables(info, actual, sequence);
     // store the elements from actual that have been visited (because we don't know we can look ahead - the 'actual'
-    // might be singly-traversable) in a fixed-length LIFO having what is in effect a sliding window.
+    // might be singly-traversable) in a fixed-length buffer having what is in effect a sliding window.
     // So we store each element and slide for each new element until a match is found or until the 'actual' is
     // exhausted. Of course if 'actual' really is infinite then this could take a while :-D
+    // Note that we only ever store sequence.length entries from actual in the buffer. Once it's full, check if it
+    // equals sequence for each new element
     final Iterator<?> actualIterator = actual.iterator();
-    if (!actualIterator.hasNext() && sequence.length == 0) return;
+    // ... perform the remaining "normal" checks explicitly
+    if(!actualIterator.hasNext() && sequence.length==0) return;
     failIfEmptySinceActualIsNotEmpty(sequence);
-    // we only store sequence.length entries from actual in the LIFO, no need for more.
-    Lifo lifo = new Lifo(sequence.length);
-    while (actualIterator.hasNext()) {
-      lifo.add(actualIterator.next());
-      if (lifo.machesExactly(sequence)) return;
+    Lifo buffer = new Lifo(sequence.length);
+    while(actualIterator.hasNext()) {
+      final Object next = actualIterator.next();
+      buffer.add(next);
+      if(buffer.equals(sequence)) return;
     }
     throw actualDoesNotContainSequence(info, actual, sequence);
   }
 
   private class Lifo {
-    private int maxSize;
-    private LinkedList<Object> stack;
+    private int writePosition;
+    private int length;
+    private Object[] buffer;
 
-    Lifo(int maxSize) {
-      this.maxSize = maxSize;
-      stack = new LinkedList<>();
+    public Lifo(int length) {
+      this.length = length;
+      this.buffer = new Object[length];
+      this.writePosition = 0;
     }
 
-    void add(final Object element) {
-      if (stack.size() == maxSize) stack.removeFirst();
-      stack.addLast(element);
+    public boolean add(final Object t) {
+      if(writePosition==length) { // ie we've already filled the buffer
+        writePosition--;
+        for (int i = 0; i < length - 1; ++i) {
+          buffer[i] = buffer[i + 1];
+        }
+      }
+      buffer[writePosition++] = t;
+      return true;
     }
 
-    boolean machesExactly(Object[] sequence) {
-      if (stack.size() != sequence.length) return false;
+    // NB we could have done this with a traditional equals() function but for the comparisonStrategy
+    public boolean equals(Object[] sequence) {
+      if (buffer.length != sequence.length) return false;
       for (int i = 0; i < sequence.length; i++) {
-        if (!areEqual(stack.get(i), sequence[i])) return false;
+        if (!areEqual(buffer[i], sequence[i])) return false;
       }
       return true;
     }
